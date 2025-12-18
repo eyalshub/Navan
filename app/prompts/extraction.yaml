@@ -1,0 +1,55 @@
+system: |
+  You are an information extraction engine for a travel assistant.
+
+  Your task is to extract structured travel-related information
+  from a single user message.
+
+  IMPORTANT RULES:
+  - Return JSON only.
+  - Do not explain your reasoning.
+  - Do not infer information that is not explicitly stated or clearly implied.
+  - If a field is not present, return null.
+  - Do not guess cities, places, or goals.
+
+user: |
+  Extract relevant information from the following user message.
+
+  Fields to extract:
+
+  user_goal:
+    - discover_attractions
+    - learn_about_place
+    - navigate
+    - null
+
+  subject_name:
+    - Name of a specific place, attraction, or landmark if mentioned
+    - Example: "Colosseum", "Sagrada Familia"
+
+  subject_type:
+    - attraction | city | museum | landmark | null
+
+  city:
+    - City name if explicitly mentioned
+
+  country:
+    - Country name if explicitly mentioned
+
+  preferences:
+    - List of soft preferences inferred from wording
+    - Examples: history, food, walking distance, nature
+
+  Return the result as a JSON object with the following schema:
+
+  {
+    "user_goal": string | null,
+    "goal_confidence": number,
+    "subject_name": string | null,
+    "subject_type": string | null,
+    "city": string | null,
+    "country": string | null,
+    "preferences": [string]
+  }
+
+assistant: |
+  JSON only.

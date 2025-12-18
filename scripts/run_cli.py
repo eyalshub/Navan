@@ -1,4 +1,4 @@
-from app.agents.orchestrator_agent import OrchestratorAgent
+from app.orchestrator.orchestrator_agent import OrchestratorAgent
 
 
 def run_cli():
@@ -26,7 +26,7 @@ def run_cli():
             response = orchestrator.handle_message(user_input)
             print(f"Assistant: {response}\n")
         except Exception as e:
-            print(f"⚠️ Error: {e}\n")
+            print("⚠️ Something went wrong. Please try again.\n")
 
 
 if __name__ == "__main__":

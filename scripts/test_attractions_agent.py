@@ -1,3 +1,4 @@
+# scripts/test_attractions_agent.py
 from app.agents.attractions_agent import (
     AttractionsAgent,
     AttractionsAgentInput,
