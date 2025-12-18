@@ -204,5 +204,7 @@ travel_assistant/
     # Optional helper script to start the application
 ```
 
+<img width="856" height="262" alt="image" src="https://github.com/user-attachments/assets/9dd3a3e7-99df-49e4-8de9-fa0d75a040bf" />
 
+<img width="839" height="269" alt="image" src="https://github.com/user-attachments/assets/374bde2f-c841-4aa1-bd5e-b69012255d18" />
 
