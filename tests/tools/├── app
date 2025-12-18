@@ -1,0 +1,40 @@
+import pytest
+from unittest.mock import patch
+from app.tools.geonames import get_points_of_interest
+
+
+@patch("app.tools.geonames.requests.get")
+def test_geonames_success(mock_get):
+    mock_get.return_value.status_code = 200
+    mock_get.return_value.json.return_value = {
+        "geonames": [
+            {
+                "name": "Colosseum",
+                "countryName": "Italy",
+                "lat": "41.8902",
+                "lng": "12.4922"
+            },
+            {
+                "name": "Pantheon",
+                "countryName": "Italy",
+                "lat": "41.8986",
+                "lng": "12.4768"
+            }
+        ]
+    }
+
+    results = get_points_of_interest("Rome", max_results=2)
+
+    assert len(results) == 2
+    assert results[0]["name"] == "Colosseum"
+    assert results[0]["country"] == "Italy"
+    assert results[0]["source"] == "geonames"
+
+
+@patch("app.tools.geonames.requests.get")
+def test_geonames_api_failure(mock_get):
+    mock_get.return_value.status_code = 500
+
+    results = get_points_of_interest("Rome")
+
+    assert results == []

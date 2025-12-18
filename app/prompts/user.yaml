@@ -1,0 +1,17 @@
+prompt: |
+  City: {city}
+
+  Place: {place_name}
+
+  Historical background:
+  {wikipedia_summary}
+
+  Nearby places of interest:
+  {nearby_list}
+
+  Upcoming events:
+  {events_list}
+
+  Task:
+  Write a short, factual explanation for a traveler.
+  Use only the information above.
