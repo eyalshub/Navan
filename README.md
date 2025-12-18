@@ -77,7 +77,7 @@ This approach keeps the system lightweight while still providing accurate naviga
 
 
 
-
+```bash
 travel_assistant/
 │
 ├── app/
@@ -202,7 +202,7 @@ travel_assistant/
 │
 └── run.sh
     # Optional helper script to start the application
-
+```
 
 
 
