@@ -1,4 +1,5 @@
 from app.orchestrator.orchestrator_agent import OrchestratorAgent
+from app.conversation.navigator import ConversationNavigator
 
 
 def run_cli():
@@ -6,11 +7,14 @@ def run_cli():
     print("Type 'exit' to quit\n")
 
     orchestrator = OrchestratorAgent()
+    navigator = ConversationNavigator()
 
-    # Initial assistant message
-    initial_message = orchestrator.get_initial_message()
-    if initial_message:
-        print(f"Assistant: {initial_message}\n")
+    # ✅ Static greeting (not from orchestrator)
+    print(
+        "Assistant: Hi! 👋 I'm your travel assistant.\n"
+        "You can tell me where you are, ask about places,\n"
+        "or explore attractions nearby.\n"
+    )
 
     while True:
         user_input = input("You: ").strip()
@@ -23,11 +27,22 @@ def run_cli():
             break
 
         try:
-            response = orchestrator.handle_message(user_input)
-            print(f"Assistant: {response}\n")
+            # 1️⃣ Orchestrator decides
+            output = orchestrator.handle_message(user_input)
+
+            # 2️⃣ Navigator renders UX
+            nav_response = navigator.navigate(output)
+
+            print(f"Assistant: {nav_response.text}")
+
+            if nav_response.next_question:
+                print(f"→ {nav_response.next_question}")
+
+            print()
+
         except Exception as e:
             print("⚠️ Something went wrong. Please try again.\n")
-
+            raise e  
 
 if __name__ == "__main__":
     run_cli()

@@ -1,9 +1,10 @@
-# scripts/simulate_conversation.py
 from app.orchestrator.orchestrator_agent import OrchestratorAgent
+from app.conversation.navigator import ConversationNavigator
 
 
 def run_simulation(title: str, messages: list[str]):
-    agent = OrchestratorAgent()
+    orchestrator = OrchestratorAgent()
+    navigator = ConversationNavigator()
 
     print("\n" + "=" * 80)
     print(f"SIMULATION: {title}")
@@ -11,45 +12,44 @@ def run_simulation(title: str, messages: list[str]):
 
     for i, msg in enumerate(messages, start=1):
         print(f"[Turn {i}] User: {msg}")
-        response = agent.handle_message(msg)
-        print(f"[Turn {i}] Assistant: {response}\n")
+
+        # 1) Orchestrator decides what happens
+        output = orchestrator.handle_message(msg)
+
+        # 2) Navigator ALWAYS handles the output
+        nav_response = navigator.navigate(output)
+
+        print(f"[Turn {i}] Assistant: {nav_response.text}")
+
+        if nav_response.next_question:
+            print(f"→ {nav_response.next_question}")
+
+        print()
 
 
 if __name__ == "__main__":
 
-    # -------------------------------------------------
-    # Simulation 1: Learn about a specific place (Rome)
-    # -------------------------------------------------
     simulation_1 = [
         "Hi, I'm in Rome, Italy",
         "I'd like to learn about the Colosseum",
-        "Yes",
         "Thanks",
-        "What else should I see nearby?"
+        "What else should I see nearby?",
     ]
 
-    # -------------------------------------------------
-    # Simulation 2: Discover attractions + choose one (London)
-    # -------------------------------------------------
     simulation_2 = [
         "Hi, I'm in London",
         "What attractions are nearby?",
-        "Yes",
-        "The British Museum",
-        "Thanks"
+        "Museums",
+        "Thanks",
+        "Tell me more about the British Museum",
     ]
-
-    # -------------------------------------------------
-    # Simulation 3: Simple discovery + navigation context
-    # -------------------------------------------------
     simulation_3 = [
         "Hello, I'm visiting Rome",
         "What can I see near the Colosseum?",
-        "Yes",
+        "Food"
         "Tell me more about the Colosseum",
-        "Sure"
     ]
 
     run_simulation("Learn about a specific place (Rome)", simulation_1)
-    run_simulation("Discover attractions and choose one (London)", simulation_2)
+    run_simulation("Discover attractions (London)", simulation_2)
     run_simulation("Discovery + explanation flow (Rome)", simulation_3)

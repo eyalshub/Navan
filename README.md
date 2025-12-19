@@ -179,6 +179,20 @@ The system includes an explicit **Guard Layer** that enforces reliability and co
 Together, these guards ensure that the assistant behaves as a **controlled, trustworthy system** rather than an open-ended chatbot.
 
 
+User input
+  ↓
+OrchestratorAgent.handle_message()
+  ↓
+returns:
+  - SlotRequestOutput
+  - AttractionsAgentOutput
+  - WikipediaExplainerOutput
+  ↓
+ConversationNavigator.navigate(output)
+  ↓
+NavigationResponse(text, next_question, suggested_intent)
+
+
 ```bash
 travel_assistant/
 │

@@ -1,36 +1,47 @@
 # app/orchestrator/orchestrator_agent.py
-# app/orchestrator/orchestrator_agent.py
-from typing import Optional
-from urllib.parse import quote_plus
+from __future__ import annotations
 
-from app.state.conversation_state import ConversationState
+import re
+from typing import Optional
+
+from app.state.conversation_state import ConversationState, normalize_preferences
 from app.orchestrator.extraction import extract_information
 
-from app.llm.client import call_llm
-from app.llm.utils import load_prompt
+from app.agents.attractions_agent import (
+    AttractionsAgent,
+    AttractionsAgentInput,
+    AttractionsAgentOutput,
+)
+from app.agents.wikipedia_explainer_agent import (
+    WikipediaExplainerAgent,
+    WikipediaExplainerOutput,
+)
 
-from app.agents.attractions_agent import AttractionsAgent, AttractionsAgentInput
-from app.agents.wikipedia_explainer_agent import WikipediaExplainerAgent
+from app.conversation.slot_request import SlotRequestOutput
 from app.tools.geoapify_client import GeoapifyClient
-
-
-# =========================
-# Prompts
-# =========================
-
-CONVERSATION_PROMPT = load_prompt("prompts/conversation.yaml")["system"]
 
 
 class OrchestratorAgent:
     """
-    Central conversation orchestrator.
+    Deterministic conversation orchestrator.
 
-    Responsibilities:
-    - Manage natural conversation via LLM
-    - Extract structured information from user input
-    - Maintain deterministic conversation state
-    - Decide when to propose and execute actions
+    Contract:
+    ---------
+    handle_message() MUST return exactly one of:
+    - SlotRequestOutput
+    - WikipediaExplainerOutput
+    - AttractionsAgentOutput
+
+    NEVER returns:
+    - str
+    - None
     """
+
+    GOAL_DISCOVER = "discover_attractions"
+    GOAL_LEARN = "learn_about_place"
+
+    ACTION_ATTRACTIONS = "run_attractions"
+    ACTION_WIKIPEDIA = "explain_subject"
 
     def __init__(self):
         self.state = ConversationState()
@@ -38,282 +49,255 @@ class OrchestratorAgent:
         self.wikipedia_agent = WikipediaExplainerAgent()
         self.geo_client = GeoapifyClient()
 
-    # -------------------------------------------------
+    # =================================================
     # Public API
-    # -------------------------------------------------
+    # =================================================
 
-    def handle_message(self, user_message: str) -> str:
+    def handle_message(self, user_message: str):
         self.state.increment_turn()
 
-        print("\n" + "=" * 60)
-        print(f"[DEBUG] Turn #{self.state.turn_count} | User: {user_message}")
+        user_text = (user_message or "").strip()
+        user_lower = user_text.lower()
 
-        # 1) Handle confirmation first
-        if self.state.awaiting_confirmation:
-            print(
-                f"[DEBUG] awaiting_confirmation=True | pending_action={self.state.pending_action}"
-            )
-            return self._handle_confirmation(user_message)
-
-        # 2) Extract structured information
-        extracted = extract_information(user_message)
-        print(f"[DEBUG] extracted={extracted}")
-
+        # 1) Extract + update state (LLM extraction can be noisy)
+        extracted = extract_information(user_text)
         self.state.update_from_extraction(extracted)
-        print(f"[DEBUG] state_after_extraction={self.state}")
+        # 🔴 If user intent is DISCOVER, old subject must not leak
+        if self.state.user_goal == self.GOAL_DISCOVER:
+            self.state.subject_name = None
+            self.state.subject_type = None
+        # 2) Deterministic enrichments (fallbacks)
+        self._fallback_city_parse(user_text)
+        self._fallback_subject_parse(user_text)
 
-        # -------------------------------------------------
-        # Semantic grounding (critical glue logic)
-        # -------------------------------------------------
+        # 3) Conservative goal inference if missing
+        if not self.state.user_goal:
+            if self._looks_like_discover_request(user_lower):
+                self.state.user_goal = self.GOAL_DISCOVER
+                self.state.goal_confidence = max(self.state.goal_confidence, 0.7)
+            elif self._looks_like_learn_request(user_lower):
+                self.state.user_goal = self.GOAL_LEARN
+                self.state.goal_confidence = max(self.state.goal_confidence, 0.7)
 
-        destination = extracted.get("destination")
-        user_lower = user_message.lower()
+        # 4) If user explicitly asks "tell me about X" -> force LEARN even if we were in DISCOVER
+        if self._looks_like_learn_request(user_lower) and self.state.subject_name:
+            self.state.user_goal = self.GOAL_LEARN
 
-        # 1) Discover attractions intent
-        if any(
-            kw in user_lower
-            for kw in ["attractions", "things to do", "what to do", "activities"]
-        ):
-            self.state.user_goal = "discover_attractions"
-            self.state.goal_confidence = max(self.state.goal_confidence, 0.7)
+        # 🔴 EXIT RAMP: learn about a specific place from attractions
+        learn_subject = self._looks_like_learn_about_place(user_text)
+        if learn_subject:
+            self.state.subject_name = learn_subject
+            self.state.user_goal = self.GOAL_LEARN
+            return self._run_wikipedia()
 
-        # 2) First destination → city (only if asking about attractions)
+        # 5) Route flows
+        if self.state.user_goal == self.GOAL_LEARN:
+            return self._handle_learn_flow(user_lower)
+
+        if self.state.user_goal == self.GOAL_DISCOVER:
+            return self._handle_discover_flow(user_lower, user_text)
+
+        # 6) No action -> clarify
+        return SlotRequestOutput(slot="clarify")
+
+    # =================================================
+    # Flow handlers
+    # =================================================
+
+    def _handle_learn_flow(self, user_lower: str):
+        if not self.state.has_subject():
+            return SlotRequestOutput(slot="subject")
+
+        # Avoid loops on acknowledgements
+        if self._looks_like_ack(user_lower):
+            return SlotRequestOutput(slot="clarify")
+
+        # Avoid repeating Wikipedia unless user asked again
         if (
-            destination
-            and not self.state.city
-            and self.state.user_goal == "discover_attractions"
+            self.state.last_executed_action == self.ACTION_WIKIPEDIA
+            and not self._looks_like_learn_request(user_lower)
         ):
-            self.state.city = destination
+            return SlotRequestOutput(slot="clarify")
 
-        # 3) Destination inside an existing city → specific place
-        elif destination and self.state.city:
-            self.state.subject_name = destination
-            self.state.user_goal = "learn_about_place"
-            self.state.goal_confidence = max(self.state.goal_confidence, 0.7)
+        return self._run_wikipedia()
 
-        # 4) Clarification → preferences (slot filling)
-        category = extracted.get("category")
-        if category and category not in self.state.preferences:
-            self.state.preferences.append(category)
+    def _handle_discover_flow(self, user_lower: str, user_text: str):
+        # City must exist
+        if not self.state.city:
+            return SlotRequestOutput(slot="city")
 
-        # 5) Decide next deterministic action
-        action = self._decide_next_action()
-        print(f"[DEBUG] decided_action={action}")
+        # If preferences missing, try to treat the user's message as a preference answer
+        if not self.state.preferences and not self._looks_like_discover_request(user_lower):
+            # Example: user answers "Museums" or "Food"
+            prefs = normalize_preferences([user_text])
+            for p in prefs:
+                if p not in self.state.preferences:
+                    self.state.preferences.append(p)
 
-        # 6) If clarification just completed → EXECUTE immediately
-        if action == "run_attractions" and self.state.preferences:
-            print("[DEBUG] executing run_attractions immediately after clarification")
-            return self._execute_action(action)
+        # Still missing preferences -> ask
+        if not self.state.preferences:
+            return SlotRequestOutput(slot="preference")
 
-        # 7) Otherwise → propose action
-        if action:
-            self.state.mark_proposal(action)
-            proposal = self._propose_action(action)
-            print(f"[DEBUG] proposal='{proposal}'")
-            return proposal
+        # Avoid loops on acknowledgements after we already executed
+        if self._looks_like_ack(user_lower) and self.state.last_executed_action == self.ACTION_ATTRACTIONS:
+            return SlotRequestOutput(slot="clarify")
 
-        # 8) Fallback → natural conversation
-        reply = self._conversational_reply(user_message)
-        print(f"[DEBUG] conversational_reply='{reply[:150]}...'")
-        return reply
+        # If we just executed attractions and user didn't ask again -> don't re-run
+        if (
+            self.state.last_executed_action == self.ACTION_ATTRACTIONS
+            and not self._looks_like_discover_request(user_lower)
+        ):
+            return SlotRequestOutput(slot="clarify")
 
-    # -------------------------------------------------
-    # Conversational layer (LLM-driven)
-    # -------------------------------------------------
+        return self._run_attractions()
 
-    def _conversational_reply(self, user_message: str) -> str:
-        return call_llm(
-            system_prompt=CONVERSATION_PROMPT,
-            user_prompt=user_message,
-            temperature=0.7,
-        )
+    # =================================================
+    # Execution
+    # =================================================
 
-    # -------------------------------------------------
-    # Decision layer (deterministic)
-    # -------------------------------------------------
-
-    def _decide_next_action(self) -> Optional[str]:
-        if self.state.user_goal == "discover_attractions" and self.state.has_location():
-            return "run_attractions"
-
-        if self.state.user_goal == "learn_about_place" and self.state.has_subject():
-            return "explain_subject"
-
-        return None
-
-    # -------------------------------------------------
-    # Proposal & confirmation
-    # -------------------------------------------------
-
-    def _propose_action(self, action: str) -> str:
-        link = self._google_maps_link_for_context()
-        extra = f"\n\n📍 Google Maps: {link}" if link else ""
-
-        if action == "run_attractions":
-            return (
-                "I can suggest a few interesting places nearby, ranked by relevance. "
-                "Would you like me to do that?"
-                + extra
-            )
-
-        if action == "explain_subject":
-            return (
-                f"I can tell you more about {self.state.subject_name} "
-                "in a short, clear explanation. Would you like that?"
-                + extra
-            )
-
-        return "Would you like me to continue?"
-
-    def _handle_confirmation(self, user_message: str) -> str:
-        normalized = user_message.strip().lower()
-
-        yes_set = {
-            "yes", "yeah", "yep", "sure", "ok", "okay",
-            "please", "go ahead", "do it"
-        }
-        no_set = {"no", "nope", "nah", "not now", "later"}
-
-        if any(word in normalized for word in yes_set):
-            if not self.state.pending_action:
-                self.state.reset_pending_action()
-                return "Great — what would you like to explore next?"
-
-            action = self.state.pending_action
-            self.state.reset_pending_action()
-            return self._execute_action(action)
-
-        if any(word in normalized for word in no_set):
-            self.state.reset_pending_action()
-            return "No problem — tell me what you’d like to do instead."
-
-        return "Just to be sure — would you like me to go ahead? (yes/no)"
-
-    # -------------------------------------------------
-    # Execution layer (agents)
-    # -------------------------------------------------
-
-    def _execute_action(self, action: str) -> str:
-        if action == "run_attractions":
-
-            # Resolve coordinates if missing
-            if self.state.latitude is None or self.state.longitude is None:
-                geo = self.geo_client.geocode(self.state.city, limit=1)
-
-                if not geo:
-                    return "I couldn’t determine your exact location."
-
-                features = geo.get("features", [])
-                if not features:
-                    return "I couldn’t determine your exact location."
-
-                coords = features[0]["geometry"]["coordinates"]
+    def _run_attractions(self) -> AttractionsAgentOutput:
+        # Resolve coordinates if missing
+        if self.state.latitude is None or self.state.longitude is None:
+            geo = self.geo_client.geocode(self.state.city, limit=1)
+            if geo and geo.get("features"):
+                coords = geo["features"][0]["geometry"]["coordinates"]
                 self.state.longitude = coords[0]
                 self.state.latitude = coords[1]
 
-            result = self.attractions_agent.run(
-                AttractionsAgentInput(
-                    city=self.state.city,
-                    lat=self.state.latitude,
-                    lon=self.state.longitude,
-                    preferences=self.state.preferences,
-                )
+        if self.state.latitude is None or self.state.longitude is None:
+            return AttractionsAgentOutput(
+                needs_clarification=True,
+                clarification_question=f"I couldn't determine coordinates for {self.state.city}. Which area/neighborhood are you in?",
+                attractions=[],
             )
 
-            if result.needs_clarification:
-                return (
-                    result.clarification_question
-                    or "What kind of places are you interested in?"
-                )
-
-            if not result.attractions:
-                response = self._wrap_action_response(
-                    "I couldn’t find interesting places nearby "
-                    "based on your preferences."
-                )
-                self._reset_after_action()
-                return response
-
-            lines = ["Here are some great places nearby:\n"]
-            for i, place in enumerate(result.attractions, 1):
-                maps_link = self._google_maps_search_link(
-                    f"{place.name}, {self.state.city}"
-                )
-                lines.append(
-                    f"{i}. {place.name}\n"
-                    f"   Why: {place.reason}\n"
-                    f"   📍 {maps_link}\n"
-                )
-
-            response = self._wrap_action_response("\n".join(lines))
-            self._reset_after_action()
-            return response
-
-        if action == "explain_subject":
-            content = self.wikipedia_agent.run(
-                subject_name=self.state.subject_name,
+        result = self.attractions_agent.run(
+            AttractionsAgentInput(
                 city=self.state.city,
+                lat=self.state.latitude,
+                lon=self.state.longitude,
+                preferences=self.state.preferences,
             )
-            response = self._wrap_action_response(content)
-            self._reset_after_action()
-            return response
-
-        return "Something went wrong while executing the action."
-
-    # -------------------------------------------------
-    # Google Maps helpers
-    # -------------------------------------------------
-
-    def _google_maps_search_link(self, query: str) -> str:
-        return (
-            "https://www.google.com/maps/search/?api=1&query="
-            + quote_plus(query)
         )
 
-    def _google_maps_link_for_context(self) -> Optional[str]:
-        if self.state.latitude is not None and self.state.longitude is not None:
-            return self._google_maps_search_link(
-                f"{self.state.latitude},{self.state.longitude}"
-            )
+        self.state.last_executed_action = self.ACTION_ATTRACTIONS
+        self._soft_reset_after_action()
+        return result
 
-        if self.state.subject_name and self.state.city:
-            return self._google_maps_search_link(
-                f"{self.state.subject_name}, {self.state.city}"
-            )
-
-        if self.state.city:
-            return self._google_maps_search_link(self.state.city)
-
-        return None
-
-    # -------------------------------------------------
-    # Response wrapper & reset
-    # -------------------------------------------------
-
-    def _wrap_action_response(self, content: str) -> str:
-        return (
-            f"{content}\n\n"
-            "—\n"
-            "What would you like to do next?\n"
-            "• explore more attractions\n"
-            "• learn about a specific place\n"
-            "• change city"
+    def _run_wikipedia(self) -> WikipediaExplainerOutput:
+        result = self.wikipedia_agent.run(
+            subject_name=self.state.subject_name,
+            city=self.state.city,
         )
 
-    def _reset_after_action(self):
-        self.state.user_goal = None
+        self.state.last_executed_action = self.ACTION_WIKIPEDIA
+        self._soft_reset_after_action()
+        return result
+
+    def _soft_reset_after_action(self) -> None:
+        """
+        Reset ONLY short-term signals.
+        Keep goal & subject so the conversation can continue naturally.
+        """
         self.state.goal_confidence = 0.0
-        self.state.pending_action = None
-        self.state.awaiting_confirmation = False
         self.state.preferences = []
+    # =================================================
+    # Deterministic fallbacks
+    # =================================================
 
-    # -------------------------------------------------
-    # Initial greeting
-    # -------------------------------------------------
+    def _fallback_city_parse(self, user_text: str) -> None:
+        """
+        If extractor missed city, catch simple patterns:
+        - "I'm in Rome"
+        - "visiting London"
+        - "in New York"
+        """
+        if self.state.city:
+            return
 
-    def get_initial_message(self) -> str:
-        return (
-            "Hi! 👋 I'm your travel assistant.\n"
-            "You can tell me where you are, ask about places, "
-            "or explore attractions nearby."
+        text = user_text.strip()
+
+        # in <city>
+        m = re.search(r"\b(?:i am|i'm)?\s*(?:in)\s+([A-Z][A-Za-z\s\-']+)", text)
+        if m:
+            self.state.city = m.group(1).strip().rstrip(".!,")
+            return
+
+        # visiting <city>
+        m = re.search(r"\bvisiting\s+([A-Z][A-Za-z\s\-']+)", text, flags=re.IGNORECASE)
+        if m:
+            self.state.city = m.group(1).strip().rstrip(".!,")
+            return
+
+    def _fallback_subject_parse(self, user_text: str) -> None:
+        """
+        If extractor missed subject, catch:
+        - "tell me more about X"
+        - "learn about X"
+        """
+        text = user_text.strip()
+
+        patterns = [
+            r"\btell me more about\s+(.+)$",
+            r"\blearn about\s+(.+)$",
+            r"\bexplain\s+(.+)$",
+        ]
+        for pat in patterns:
+            m = re.search(pat, text, flags=re.IGNORECASE)
+            if m:
+                candidate = m.group(1).strip().rstrip(".!,")
+                if candidate:
+                    self.state.subject_name = candidate
+                return
+
+    # =================================================
+    # Text heuristics
+    # =================================================
+
+    def _looks_like_ack(self, text: str) -> bool:
+        t = text.strip()
+        return t in {
+            "thanks", "thank you", "thx",
+            "ok", "okay", "cool", "great", "nice",
+            "awesome", "perfect", "got it", "alright",
+        }
+
+    def _looks_like_learn_request(self, text: str) -> bool:
+        learn_triggers = (
+            "learn about", "tell me about", "tell me more about",
+            "explain", "what is", "who is", "history of",
+            "more about", "details about",
         )
+        return any(t in text for t in learn_triggers)
+
+    def _looks_like_discover_request(self, text: str) -> bool:
+        discover_triggers = (
+            "attractions", "things to do", "what to do", "activities",
+            "nearby", "around here", "what else should i see",
+            "what can i see", "recommend", "recommendations",
+            "places to visit", "points of interest",
+        )
+        return any(t in text for t in discover_triggers)
+
+
+
+    def _looks_like_learn_about_place(self, text: str) -> Optional[str]:
+        """
+        Detect requests like:
+        - 'tell me about X'
+        - 'teach me about X'
+        - 'learn about X'
+        Returns the extracted subject if found.
+        """
+        patterns = [
+            r"tell me about\s+(.+)",
+            r"teach me about\s+(.+)",
+            r"learn about\s+(.+)",
+            r"explain\s+(.+)",
+        ]
+
+        for pat in patterns:
+            m = re.search(pat, text, flags=re.IGNORECASE)
+            if m:
+                return m.group(1).strip().rstrip(".!,")
+        return None

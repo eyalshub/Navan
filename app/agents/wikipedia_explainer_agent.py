@@ -25,7 +25,10 @@ class WikipediaExplainerOutput:
 class WikipediaExplainerAgent:
     """
     Explains a place using Wikipedia as a grounded knowledge source.
-    Fully self-contained execution agent.
+
+    Contract:
+    - run(...) returns WikipediaExplainerOutput (structured)
+    - NEVER returns str (formatting belongs to the ConversationNavigator)
     """
 
     def __init__(self):
@@ -35,44 +38,76 @@ class WikipediaExplainerAgent:
     # Public API (used by Orchestrator)
     # -------------------------------------------------
 
-    def run(self, subject_name: str, city: Optional[str] = None) -> str:
+    def run(
+        self,
+        subject_name: str,
+        city: Optional[str] = None,
+        user_style: str = "friendly",
+    ) -> WikipediaExplainerOutput:
         """
         Main execution entrypoint for the Orchestrator.
-        Keeps the agent logic intact by normalizing Wikipedia output.
+        Returns a structured WikipediaExplainerOutput.
         """
 
-        query = subject_name
-
-        wiki_data = get_wikipedia_summary(query)
-
-        # Normalize Wikipedia tool output -> raw summary string
-        if not isinstance(wiki_data, dict) or not wiki_data.get("found"):
-            return f"Sorry, I couldn’t find reliable information about {subject_name}."
-
-        raw_summary = wiki_data.get("summary")
-
-        if not raw_summary or not isinstance(raw_summary, str):
-            return f"Sorry, I couldn’t find reliable information about {subject_name}."
-
-        input_data = WikipediaExplainerInput(
-            title=wiki_data.get("title") or subject_name,
-            raw_summary=raw_summary,
+        wiki_data = get_wikipedia_summary(
+            title=subject_name,
+            city=city,
         )
 
-        output = self._explain(input_data)
+        # If no reliable source -> return structured "not found"
+        if not isinstance(wiki_data, dict) or not wiki_data.get("found"):
+            return WikipediaExplainerOutput(
+                explanation=f"Sorry, I couldn’t find reliable information about {subject_name}.",
+                key_points=[],
+                followup_suggestions=[],
+            )
 
-        response = output.explanation
+        raw_summary = wiki_data.get("summary")
+        title = wiki_data.get("title") or subject_name
 
-        if output.key_points:
-            response += "\n\nKey highlights:\n"
-            for point in output.key_points:
-                response += f"- {point}\n"
+        if not raw_summary or not isinstance(raw_summary, str):
+            return WikipediaExplainerOutput(
+                explanation=f"Sorry, I couldn’t find reliable information about {subject_name}.",
+                key_points=[],
+                followup_suggestions=[],
+            )
 
-        return response.strip()
+        input_data = WikipediaExplainerInput(
+            title=title,
+            raw_summary=raw_summary,
+            user_style=user_style,
+        )
+
+        # LLM-based explanation (grounded)
+        try:
+            return self._explain(input_data)
+        except Exception:
+            # Defensive fallback: never crash orchestrator
+            return WikipediaExplainerOutput(
+                explanation=f"I found information about {subject_name}, but I couldn’t format it reliably right now.",
+                key_points=[],
+                followup_suggestions=[],
+            )
 
     # -------------------------------------------------
-    # Internal logic (existing behavior)
+    # Internal helpers
     # -------------------------------------------------
+
+    def _build_query(self, subject_name: str, city: Optional[str]) -> str:
+        """
+        Optional disambiguation:
+        if city exists and subject is not obviously a city itself,
+        we can enrich the query slightly.
+        """
+        subject = (subject_name or "").strip()
+        if not subject:
+            return subject_name
+
+        if city and city.strip():
+            # This is safe and often helps Wikipedia resolve the right article.
+            return f"{subject}, {city.strip()}"
+
+        return subject
 
     def _explain(self, input: WikipediaExplainerInput) -> WikipediaExplainerOutput:
         if not input.raw_summary.strip():
@@ -90,15 +125,32 @@ class WikipediaExplainerAgent:
         raw_response = call_llm(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
+            temperature=0.2,
         )
 
         try:
             parsed = json.loads(raw_response)
-        except json.JSONDecodeError:
-            raise ValueError(f"LLM did not return valid JSON:\n{raw_response}")
+        except json.JSONDecodeError as e:
+            raise ValueError(f"LLM did not return valid JSON: {e}\n{raw_response}")
+
+        explanation = parsed.get("explanation")
+        if not isinstance(explanation, str) or not explanation.strip():
+            raise ValueError(f"LLM JSON missing 'explanation': {parsed}")
+
+        key_points = parsed.get("key_points", [])
+        if not isinstance(key_points, list):
+            key_points = []
+
+        followups = parsed.get("followup_suggestions", [])
+        if not isinstance(followups, list):
+            followups = []
+
+        # Normalize list items to strings
+        key_points = [str(x).strip() for x in key_points if str(x).strip()]
+        followups = [str(x).strip() for x in followups if str(x).strip()]
 
         return WikipediaExplainerOutput(
-            explanation=parsed["explanation"],
-            key_points=parsed.get("key_points", []),
-            followup_suggestions=parsed.get("followup_suggestions", []),
+            explanation=explanation.strip(),
+            key_points=key_points,
+            followup_suggestions=followups,
         )
