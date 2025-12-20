@@ -1,20 +1,96 @@
-## ✈️ Travel Assistant
+# Navan – Smart Travel Assistant 🧭
 
-Travel Assistant is an intelligent, conversation-driven travel companion designed to act as your personal assistant throughout a trip.
+## 📌 Table of Content
+1. [Overview](#overview)
+2. [Features](#features)
+3. [Architecture](#architecture)
+4. [Agents](#agents)
+5. [Conversation Flow](#conversation-flow)
+6. [Installation](#installation)
+7. [Running the Assistant](#running-the-assistant)
+8. [Simulation Examples](#simulation-examples)
+9. [Project Structure](#project-structure)
+10. [Roadmap](#roadmap)
+11. API
 
-The agent helps you discover relevant attractions, restaurants, museums, and points of interest based on your preferences and current location. It can also provide historical and contextual information about places you visit, and guide you to exact locations using external geographic services.
 
-Unlike generic chatbots, the Travel Assistant is built around a deterministic orchestration pipeline. It combines structured intent detection, explicit slot-filling, and external APIs (geocoding, places, knowledge bases) to deliver accurate, grounded, and reliable responses while minimizing hallucinations.
+## 🧭 Overview
 
-The system maintains short-term conversational context, understands follow-up questions, and adapts its responses as the conversation evolves — enabling a natural yet controlled travel planning and exploration experience.
+Navan is a conversational travel assistant that helps users explore cities and landmarks through a natural dialogue interface.
 
+**Powered by a multi-agent orchestration system and LLM-based extraction, Navan can:**
 
-## 🧠 System Architecture & Conversation Pipeline
-The Travel Assistant is built as a deterministic, intent-driven orchestration system.
-Each user message passes through a structured pipeline that separates understanding,
-decision-making, and execution.
+- Understand the user's location and interests
+- Recommend nearby attractions tailored to preferences
+- Provide historical or cultural background on landmarks
+- Maintain conversational memory and context
 
-At a high level, the system operates in the following stages:
+**Goal:** Create a smart, guided conversation flow for travelers that feels intuitive, informative, and helpful – without requiring a GUI or app installation.
+---
+
+## ✨ Features
+
+- 🗺️ **Location-aware interactions**  
+  Extracts city and country from free-text input and enriches with geolocation data (Geoapify).
+
+- 🎯 **User intent recognition**  
+  Classifies user goals such as learning about a place, discovering attractions, or finding events using LLM extraction.
+
+- 🏛️ **Wikipedia integration**  
+  Provides reliable summaries about places using Wikipedia and LLM reformulation.
+
+- 🧠 **Multi-turn conversation memory**  
+  Tracks context, user preferences, and previously discussed places.
+
+- 🧭 **Attractions recommender agent**  
+  Suggests places based on geolocation and preferences (e.g., "art", "nature").
+
+- 📚 **LLM-driven YAML extraction**  
+  Uses structured prompts with `system`, `user`, and `assistant` roles for consistent field extraction.
+
+- ⚙️ **Modular agent orchestration**  
+  Clear separation of concerns for each agent.
+
+- 🖥️ **CLI simulation interface**  
+  Easy to run and test interactions without needing a frontend.
+
+---
+
+## 🏗️ Architecture
+
+### 🧩 Modular Design
+
+| Layer | Description |
+|-------|-------------|
+| **Orchestrator Agent** | Central controller. Manages conversation state, routes to relevant agents. |
+| **Wikipedia Explainer Agent** | Fetches summaries and rewrites them clearly via LLM. |
+| **Attractions Agent** | Finds POIs based on geolocation and preferences. |
+| **Geoapify Client** | Handles geocoding and attraction lookup. |
+| **LLM Extraction** | Extracts structured data from user messages via prompt templates. |
+| **Conversation State** | Tracks user location, preferences, and goals. |
+| **Navigator** | Converts structured agent outputs into assistant messages. |
+
+---
+
+## 🧠 Prompt Templates
+
+Located in `prompts/`, these define how the LLM behaves per task.
+
+| File | Purpose |
+|------|---------|
+| `conversation.yaml` | Dialogue guidance |
+| `extraction.yaml` | Extract structured fields |
+| `wikipedia_prompt.yaml` | Landmark explanation |
+| `attractions_prompt.yaml` | Nearby POI suggestions |
+| `fallback_prompt.yaml` | Graceful error handling |
+
+Each contains:  
+- `system`: LLM role & tone  
+- `user`: Instructional format  
+- `assistant`: Ideal response structure
+
+---
+## 💬 Conversation Flow
 
 User
   ↓
@@ -23,6 +99,209 @@ Orchestrator Agent
   ├── Wikipedia Explainer Agent ──→ Wikipedia
   └── Location Resolver ──→ GeoNames (+ Google Maps link)
 
+
+User input
+↓
+OrchestratorAgent.handle_message()
+↓
+returns:
+* SlotRequestOutput
+* AttractionsAgentOutput
+* WikipediaExplainerOutput
+↓
+ConversationNavigator.navigate(output)
+↓
+NavigationResponse(text, next_question)
+---
+
+## 🛠️ Installation
+
+```bash
+git clone https://github.com/eyalshub/Navan.git
+cd Navan
+pip install -r requirements.txt
+```
+Create your .env file from .env.example and add API keys for:
+OpenAI
+Geoapify
+GeoNames
+
+### ▶️ Running the Assistant
+```bash
+python scripts/run_cli.py
+```
+Run Simulated Dialogues:
+```bash
+python scripts/simulate_conversation.py
+```
+
+## Simulation Examples
+<img width="744" height="501" alt="image" src="https://github.com/user-attachments/assets/3263006e-93ec-4556-8c92-77bd6b38dc3f" />
+
+
+<img width="731" height="243" alt="image" src="https://github.com/user-attachments/assets/dae39faf-e007-4a88-b7ca-ea40ad244509" />
+
+<img width="926" height="239" alt="image" src="https://github.com/user-attachments/assets/4fba2107-39a6-49c7-8f0a-05c5c89b5ac0" />
+
+![alt text](image.png)
+
+![alt text](image-1.png)
+
+![alt text](image-2.png)
+
+
+
+```bash
+travel_assistant/
+│
+├── app/
+│   ├── main.py
+│   │   # Application entry point (CLI / runtime bootstrap)
+│
+│   ├── context.py
+│   │   # Global conversation context and shared state helpers
+│   |├──llm_conversation_responder.py
+│   ├── agents/
+│   │   ├── __init__.py
+│   │   │   # Agents package
+│   │   ├── orchestrator_agent.py
+│   │   │   # Central orchestrator: intent detection, slot-filling, routing
+│   │   ├── attractions_agent.py
+│   │   │   # Discovers nearby attractions using Geoapify + LLM ranking
+│   │   └── wikipedia_explainer_agent.py
+│   │       # Explains places using Wikipedia summaries
+│
+│   ├── conversation/
+│   │   └── navigator.py
+│   │       # Translates agent outputs into user-facing responses
+│   ├── orchestrator/
+│   │   └── extraction.py
+│   │   └── orchestrator_agent.py
+│
+│   ├── guards/
+│   │   ├── __init__.py
+│   │   │   # Guard layer package
+│   │   ├── conversation_guard.py
+│   │   │   # Conversation flow constraints and safety checks
+│   │   ├── hallucination_guard.py
+│   │   │   # Prevents speculative or ungrounded responses
+│   │   └── relevance_guard.py
+│   │       # Ensures responses remain contextually relevant
+│
+│   ├── llm/
+│   │   ├── __init__.py
+│   │   │   # LLM utilities package
+│   │   ├── utils.py
+│   │   │   # Prompt formatting and response helpers
+│   │   ├── client.py
+│   │   │   # LLM API wrapper (single access point)
+│   │   └── prompt_loader.py
+│   │       # Loads YAML-based prompts
+│
+│   ├── prompts/
+│   │   ├── conversation.yaml
+│   │   │   # Global system rules and guardrails
+│   │   ├── extraction.yaml
+│   │   │   # High-level intent planning prompt
+│   │   ├── orchestrator.yaml
+│   │   │   # Orchestrator decision logic prompt
+│   │   ├── wikipedia_explainer.yaml
+│   │   │   # Wikipedia explanation prompt
+│   │   └── attractions_agent.yaml
+│   │       # Attractions ranking and explanation prompt
+│
+│   ├── tools/
+│   │   ├── wikipedia.py
+│   │   │   # Wikipedia API adapter
+│   │   ├── geo_tool.py
+│   │   │   # Shared geographic utility functions
+│   │   ├── geoapify_client.py
+│   │   │   # Geoapify API client (geocoding & POIs)
+│   │   ├── geonames.py
+│   │   │   # GeoNames API client (city & POI resolution)
+│   │   └── eventbrite.py
+│   │       # Event discovery API integration (optional)
+│
+│   ├── routing/
+│   │   ├── place_category_resolver.py
+│   │   │   # Maps user preferences to place categories
+│   │   └── place_intent.py
+│   │       # Resolves place-related intents from text
+│
+├── scripts/
+│   ├── debug_geonames_raw.py
+│   │   # Low-level GeoNames API debugging
+│   ├── geo_tool_test.py
+│   │   # Manual tests for geographic utilities
+│   ├── geoapify_demo.py
+│   │   # Geoapify usage demo
+│   ├── run_cli.py
+│   │   # CLI runner for interactive testing
+│   ├── test_attractions_agent.py
+│   │   # Attractions agent tests
+│   ├── test_conversation_navigator.py
+│   │   # Conversation rendering tests
+│   ├── test_eventbrite_live.py
+│   │   # Live Eventbrite API tests
+│   ├── test_geonames_live.py
+│   │   # Live GeoNames API tests
+│   ├── test_llm_live.py
+│   │   # Live LLM integration tests
+│   ├── test_orchestrator_agent.py
+│   │   # Orchestrator behavior tests
+│   ├── test_wikipedia_explainer.py
+│   │   # Wikipedia explainer agent tests
+│   └── test_wikipedia_live.py
+│       # Live Wikipedia API tests
+│
+├── transcripts/
+│   ├── demo_discovery.md
+│   │   # Example attraction discovery conversations
+│   ├── demo_history.md
+│   │   # Example historical explanation flows
+│   └── demo_recovery.md
+│       # Edge cases and recovery scenarios
+│
+├── tests/
+│   └── app/
+│       # Optional structured test suite
+│
+├── .env.example
+│   # Environment variable template (API keys)
+│
+├── requirements.txt
+│   # Python dependencies
+│
+├── README.md
+│   # Project documentation
+│
+└── run.sh
+    # Optional helper script to start the application
+```
+
+
+## 🧭 Roadmap
+✅ Current
+
+* Deterministic multi-agent orchestration
+* Wikipedia & Geoapify integration
+* Structured YAML-based LLM extraction
+
+🔜 Next
+* Event recommendations (Eventbrite/Ticketmaster)
+* 3-day itinerary planning
+* Persistent memory layer
+* Web-based interface
+
+## 💡 Future Ideas
+* Multilingual support (Hebrew, Spanish)
+* Real-time weather via WeatherAPI
+* Booking integration (Skyscanner, Booking.com)
+* Mobile version (React Native, Telegram Bot)
+
+
+
+## API:
 ## 🔌 External APIs & Services
 All external services are accessed through controlled adapters and are never queried directly
 from the user interface.
@@ -73,6 +352,9 @@ allowing users to navigate to the requested location instantly.
 Instead of directly integrating the Google Maps API, the system generates Google Maps
 links based on resolved latitude and longitude coordinates.
 This approach keeps the system lightweight while still providing accurate navigation capabilities.
+
+
+
 
 
 ## 🎯 Core Agents & Deterministic Orchestration
@@ -192,138 +474,4 @@ ConversationNavigator.navigate(output)
   ↓
 NavigationResponse(text, next_question, suggested_intent)
 
-
-```bash
-travel_assistant/
-│
-├── app/
-│   ├── main.py
-│   │   # Application entry point (CLI / runtime bootstrap)
-│
-│   ├── context.py
-│   │   # Global conversation context and shared state helpers
-│
-│   ├── agents/
-│   │   ├── __init__.py
-│   │   │   # Agents package
-│   │   ├── orchestrator_agent.py
-│   │   │   # Central orchestrator: intent detection, slot-filling, routing
-│   │   ├── attractions_agent.py
-│   │   │   # Discovers nearby attractions using Geoapify + LLM ranking
-│   │   └── wikipedia_explainer_agent.py
-│   │       # Explains places using Wikipedia summaries
-│
-│   ├── conversation/
-│   │   └── navigator.py
-│   │       # Translates agent outputs into user-facing responses
-│   ├── orchestrator/
-│   │   └── extraction.py
-│   │   └── orchestrator_agent.py
-│
-│   ├── guards/
-│   │   ├── __init__.py
-│   │   │   # Guard layer package
-│   │   ├── conversation_guard.py
-│   │   │   # Conversation flow constraints and safety checks
-│   │   ├── hallucination_guard.py
-│   │   │   # Prevents speculative or ungrounded responses
-│   │   └── relevance_guard.py
-│   │       # Ensures responses remain contextually relevant
-│
-│   ├── llm/
-│   │   ├── __init__.py
-│   │   │   # LLM utilities package
-│   │   ├── utils.py
-│   │   │   # Prompt formatting and response helpers
-│   │   ├── client.py
-│   │   │   # LLM API wrapper (single access point)
-│   │   └── prompt_loader.py
-│   │       # Loads YAML-based prompts
-│
-│   ├── prompts/
-│   │   ├── system.yaml
-│   │   │   # Global system rules and guardrails
-│   │   ├── planner.yaml
-│   │   │   # High-level intent planning prompt
-│   │   ├── responder.yaml
-│   │   │   # Grounded response generation prompt
-│   │   ├── orchestrator.yaml
-│   │   │   # Orchestrator decision logic prompt
-│   │   ├── wikipedia_explainer.yaml
-│   │   │   # Wikipedia explanation prompt
-│   │   └── attractions_agent.yaml
-│   │       # Attractions ranking and explanation prompt
-│
-│   ├── tools/
-│   │   ├── wikipedia.py
-│   │   │   # Wikipedia API adapter
-│   │   ├── geo_tool.py
-│   │   │   # Shared geographic utility functions
-│   │   ├── geoapify_client.py
-│   │   │   # Geoapify API client (geocoding & POIs)
-│   │   ├── geonames.py
-│   │   │   # GeoNames API client (city & POI resolution)
-│   │   └── eventbrite.py
-│   │       # Event discovery API integration (optional)
-│
-│   ├── routing/
-│   │   ├── place_category_resolver.py
-│   │   │   # Maps user preferences to place categories
-│   │   └── place_intent.py
-│   │       # Resolves place-related intents from text
-│
-├── scripts/
-│   ├── debug_geonames_raw.py
-│   │   # Low-level GeoNames API debugging
-│   ├── geo_tool_test.py
-│   │   # Manual tests for geographic utilities
-│   ├── geoapify_demo.py
-│   │   # Geoapify usage demo
-│   ├── run_cli.py
-│   │   # CLI runner for interactive testing
-│   ├── test_attractions_agent.py
-│   │   # Attractions agent tests
-│   ├── test_conversation_navigator.py
-│   │   # Conversation rendering tests
-│   ├── test_eventbrite_live.py
-│   │   # Live Eventbrite API tests
-│   ├── test_geonames_live.py
-│   │   # Live GeoNames API tests
-│   ├── test_llm_live.py
-│   │   # Live LLM integration tests
-│   ├── test_orchestrator_agent.py
-│   │   # Orchestrator behavior tests
-│   ├── test_wikipedia_explainer.py
-│   │   # Wikipedia explainer agent tests
-│   └── test_wikipedia_live.py
-│       # Live Wikipedia API tests
-│
-├── transcripts/
-│   ├── demo_discovery.md
-│   │   # Example attraction discovery conversations
-│   ├── demo_history.md
-│   │   # Example historical explanation flows
-│   └── demo_recovery.md
-│       # Edge cases and recovery scenarios
-│
-├── tests/
-│   └── app/
-│       # Optional structured test suite
-│
-├── .env.example
-│   # Environment variable template (API keys)
-│
-├── requirements.txt
-│   # Python dependencies
-│
-├── README.md
-│   # Project documentation
-│
-└── run.sh
-    # Optional helper script to start the application
-```
-
-<img width="856" height="262" alt="image" src="https://github.com/user-attachments/assets/9dd3a3e7-99df-49e4-8de9-fa0d75a040bf" />
-
-<img width="839" height="269" alt="image" src="https://github.com/user-attachments/assets/374bde2f-c841-4aa1-bd5e-b69012255d18" />
 

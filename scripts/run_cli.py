@@ -1,3 +1,5 @@
+# scripts/run_cli.py
+
 from app.orchestrator.orchestrator_agent import OrchestratorAgent
 from app.conversation.navigator import ConversationNavigator
 
@@ -9,7 +11,7 @@ def run_cli():
     orchestrator = OrchestratorAgent()
     navigator = ConversationNavigator()
 
-    # ✅ Static greeting (not from orchestrator)
+    # ✅ Static greeting
     print(
         "Assistant: Hi! 👋 I'm your travel assistant.\n"
         "You can tell me where you are, ask about places,\n"
@@ -33,16 +35,16 @@ def run_cli():
             # 2️⃣ Navigator renders UX
             nav_response = navigator.navigate(output)
 
-            print(f"Assistant: {nav_response.text}")
-
+            # Print assistant response
+            print(f"\nAssistant: {nav_response.text}")
             if nav_response.next_question:
                 print(f"→ {nav_response.next_question}")
-
             print()
 
         except Exception as e:
             print("⚠️ Something went wrong. Please try again.\n")
-            raise e  
+            raise e
+
 
 if __name__ == "__main__":
     run_cli()
