@@ -173,10 +173,12 @@ travel_assistant/
 │   ├── conversation/
 │   │   └── navigator.py
 │   │       # Translates agent outputs into user-facing responses
+│   │   └── slot_request.py
 │   ├── orchestrator/
 │   │   └── extraction.py
 │   │   └── orchestrator_agent.py
-│
+│   ├──schema/
+│   │   ├── agent_response.py
 │   ├── guards/
 │   │   ├── __init__.py
 │   │   │   # Guard layer package
@@ -252,7 +254,8 @@ travel_assistant/
 │   │   # Wikipedia explainer agent tests
 │   └── test_wikipedia_live.py
 │       # Live Wikipedia API tests
-│
+│   └── test_llm_conversation_responder
+│   └──test_extraction.py
 ├── transcripts/
 │   ├── demo_discovery.md
 │   │   # Example attraction discovery conversations
