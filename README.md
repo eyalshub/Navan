@@ -91,15 +91,15 @@ Each contains:
 
 ---
 ## 💬 Conversation Flow
-
+```
 User
   ↓
 Orchestrator Agent
   ├── Attractions Agent ──→ Geoapify / GeoNames
   ├── Wikipedia Explainer Agent ──→ Wikipedia
   └── Location Resolver ──→ GeoNames (+ Google Maps link)
-
-
+```
+```
 User input
 ↓
 OrchestratorAgent.handle_message()
@@ -112,6 +112,7 @@ returns:
 ConversationNavigator.navigate(output)
 ↓
 NavigationResponse(text, next_question)
+```
 ---
 
 ## 🛠️ Installation
