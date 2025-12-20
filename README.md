@@ -165,8 +165,6 @@ travel_assistant/
 │   ├── agents/
 │   │   ├── __init__.py
 │   │   │   # Agents package
-│   │   ├── orchestrator_agent.py
-│   │   │   # Central orchestrator: intent detection, slot-filling, routing
 │   │   ├── attractions_agent.py
 │   │   │   # Discovers nearby attractions using Geoapify + LLM ranking
 │   │   └── wikipedia_explainer_agent.py
